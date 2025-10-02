@@ -1,3 +1,0 @@
-load "ALGORITHM"
-
-writeln(toLower(readln("Enter name: ")))
