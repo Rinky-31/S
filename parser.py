@@ -44,38 +44,41 @@ class Environment:
         if res is None and env.parent:
             res = self.get(varname, env.parent)
         return res
+    
+    def __repr__(self):
+        res = "\n" + "\n".join(self.vars) + "\n"
+        return f"{self.__class__.__name__}({res})"
 
 
 class Function:
     def __init__(
         self,
-        argcount: int = 0,
         body: list["Node"] = [],
-        params_name: Optional[list] = None,
+        params: Optional[list["Node"]] = None,
         _env: Optional[Environment] = None,
         *,
         executor=None,
         name: str = None,
         global_executor_env: bool = False,
     ):
-        self.argcount = argcount
         self.body = list(filter(None, body))
         self.executor = executor
         self.env = Environment(parent=_env or env)
         self.is_global_executor = global_executor_env
-        self.params_name = params_name or []
+        self.params = params or []
         self.name = name
 
     def exec_body(self, args: list):
         args = list(filter(lambda a: a is not None, args))
         local_env = Environment(parent=self.env)
-        local_env.vars.update(zip(self.params_name, args))
+        params_name = [param.value for param in self.params]
+        local_env.vars.update(parameters := tuple(zip(params_name, args)))
+        for param in self.params:
+            if param.type == "REQUIRED_PARAMETER" and param.value:
+                if not any(p == param.value for p, _ in parameters):
+                    raise TypeError(f"Function missing required parameter {param.value}")
         if self.name:
             local_env.set(self.name, self)
-        if self.argcount != len(args) and self.argcount != -1:
-            raise TypeError(
-                f"Function get {len(args)} params, but {self.argcount} excepted"
-            )
         if self.executor:
             if self.is_global_executor:
                 local_env = env
@@ -91,7 +94,7 @@ class Function:
                 return res.value
     
     def __repr__(self):
-        return f"func {self.name}({', '.join(self.params_name)}) {{ ... }}"
+        return f"func {self.name}({', '.join(self.params)}) {{ ... }}"
 
 
 class Node:
@@ -129,7 +132,7 @@ class Parser:
             if self.token().type in ("ENDEXPR", "ENDL"):
                 self.next()
                 continue
-            nodes.append(self.expression())
+            nodes.append(self.assign_handle())
             if self.has_next_token() and self.token().type in ("ENDEXPR", "ENDL"):
                 self.next()
         return nodes
@@ -148,6 +151,15 @@ class Parser:
 
     def has_next_token(self):
         return self.pos < self.length - 1
+    
+    def assign_handle(self) -> Node:
+        node = self.expression()
+        if self.has_next_token() and (token := self.token()).type in (
+            "EQUALS",
+        ):
+            self.next()
+            node = Node(token.type, left=node, right=self.assign_handle())
+        return node
 
     def expression(self) -> Node:
         node = self.and_handle()
@@ -159,9 +171,18 @@ class Parser:
         return node
     
     def and_handle(self) -> Node:
-        node = self.cmp_op()
+        node = self.handle_contains()
         while self.has_next_token() and (token := self.token()).type in (
             "AND",
+        ):
+            self.next()
+            node = Node(token.type, left=node, right=self.handle_contains())
+        return node
+    
+    def handle_contains(self) -> Node:
+        node = self.cmp_op()
+        while self.has_next_token() and (token := self.token()).type in (
+            "CONTAINS",
         ):
             self.next()
             node = Node(token.type, left=node, right=self.cmp_op())
@@ -191,13 +212,22 @@ class Parser:
         return node
 
     def term(self) -> Node:
-        node = self.factor()
+        node = self.handle_attributes()
         while self.has_next_token() and (token := self.token()).type in (
             "STAR",
             "SLASH",
         ):
             self.next()
-            node = Node(token.type, left=node, right=self.factor())
+            node = Node(token.type, left=node, right=self.handle_attributes())
+        return node
+    
+    def handle_attributes(self) -> Node:
+        node = self.factor()
+        if self.has_next_token() and (token := self.token()).type in (
+            "OF",
+        ):
+            self.next()
+            node = Node(token.type, left=node, right=self.handle_attributes())
         return node
 
     def factor(self) -> Node:
@@ -226,15 +256,6 @@ class Parser:
                         node = self.call_object(node)
                         self.next("RPAREN")
                         return node
-                    case "EQUALS":
-                        self.next()
-                        self.next()
-                        node = Node(
-                            "ASSIGN",
-                            left=Node(token.type, token.value),
-                            right=self.expression(),
-                        )
-                        return node
                     case "INCREMENT":
                         self.next()
                         self.next()
@@ -251,7 +272,7 @@ class Parser:
                 return Node("NAME", token.value)
             case "LPAREN":
                 self.next()
-                node = self.expression()
+                node = self.assign_handle()
                 self.next("RPAREN")
                 return node
             case "KEYWORD":
@@ -299,20 +320,16 @@ class Parser:
                         return Node("LOOP", loop_type, children=[condition, Node("BODY", children=body)])
                 self.next()
                 return Node("KEYWORD", token.value)
-            case "EQUALS":
-                raise SyntaxError("Unexcepted token: '='")
             case "LBRACKET":
                 self.next()
-                return Node("LBRACKET", right=self.expression())
+                return Node("LBRACKET", right=self.assign_handle())
             case "RBRACKET":
                 self.next()
                 return Node("RBRACKET")
-            case a if a not in ("ENDL", "ENDEXPR"):
-                raise SyntaxError(f"Unexcepted token: '{token.value}'")
 
     def call_object(self, node: Node, anonymous: bool = False):
         def read_parameter():
-            param = self.expression()
+            param = self.assign_handle()
             return param
 
         def handle_parameters():
@@ -345,8 +362,14 @@ class Parser:
         self.next("LPAREN")
         params = []
         while self.token().type != "RPAREN":
-            if self.token().type == "NAME":
-                params.append(self.token().value)
+            token = self.token()
+            if token.type == "KEYWORD" and token.value == "req":
+                if self.token(1).type != "NAME":
+                    raise SyntaxError("Excepted identifier")
+                self.next()
+                params.append(Node("REQUIRED_PARAMETER", self.token().value))
+            if token.type == "NAME":
+                params.append(Node("UNREQUIRED_PARAMETER", token.value))
             self.next()
             if self.token().type == "COMMA":
                 self.next()
@@ -381,7 +404,7 @@ class Parser:
         self.next("LBRACKET")
         body = []
         while self.token().type != "RBRACKET":
-            body.append(self.expression())
+            body.append(self.assign_handle())
             if self.token().type in ("ENDEXPR", "ENDL"):
                 self.next()
         self.next("RBRACKET")
@@ -424,10 +447,31 @@ def eval_parsed(node: Node, env: Environment):
     if not node:
         return
     match node.type:
+        case "OF":
+            attribute, from_object = node.left, eval_parsed(node.right, env)
+            match attribute.type:
+                case "CALL":
+                    params = map(lambda a: eval_parsed(a, env), attribute.children)
+                    if isinstance(from_object, Environment):
+                        res = from_object.get(attribute.value)
+                        if hasattr(res, "exec_body"):
+                            return res.exec_body(params)
+                        return res(*params)
+                    return getattr(from_object, attribute.value)(*params)
+                case "NAME":
+                    if isinstance(from_object, Environment):
+                        return from_object.get(attribute.value)
+                    if attribute.value == "length":
+                        return from_object.__len__()
+                    return getattr(from_object, attribute.value)
+                case _:
+                    raise SyntaxError("Excepted identifier")
         case "AND":
             return int(bool(eval_parsed(node.left, env) and eval_parsed(node.right, env)))
         case "OR":
             return int(bool(eval_parsed(node.left, env) or eval_parsed(node.right, env)))
+        case "CONTAINS":
+            return int(bool(eval_parsed(node.right, env) in eval_parsed(node.left, env)))
         case "GREATER":
             return int(bool(eval_parsed(node.left, env) > eval_parsed(node.right, env)))
         case "GREATER_EQ":
@@ -481,22 +525,40 @@ def eval_parsed(node: Node, env: Environment):
             if type(node.left) == Function:
                 return node.left.exec_body(parameters)
             raise TypeError("cannot call anonymous object that is not callable")
-        case "ASSIGN":
+        case "EQUALS":
+            if node.left.type not in ("NAME", "OF"):
+                raise SyntaxError("Invalid left operand for '='")
+            if node.left.type == "OF":
+                attr_name = node.left.left.value
+                obj = eval_parsed(node.left.right, env)
+                setattr(obj, attr_name, eval_parsed(node.right, env))
+            if node.right.type == "LOAD_MODULE":
+                if node.right.children[0].value.strip("\"") in loaded_modules:
+                    return
+                eval_parsed(node.right, env)
+                _env = Environment(env.vars.copy())
+                env.set(node.left.value, _env)
+                return _env
             left, right = node.left.value, eval_parsed(node.right, env)
             if (i := isinstance(right, Instruction)) and node.right.type != "IF_STATEMENT":
                 raise SyntaxError("Invalid right operand for '='")
-            env.set(left, right if not i else right.value)
-            return env.get(left)
+            env.set(left, val := right if not i else right.value)
+            return val
+        
         case "DEFINE_FUNCTION":
             func_name = node.value
             params = node.children[0].value
             body = node.children[1].children
-            env.set(func_name, Function(len(params), body, params, env, name=func_name))
+            env.set(func_name, Function(body, params, env, name=func_name))
         case "LOAD_MODULE":
             if len(node.children) != 1 or node.children[0].type != "STRING_LITERAL":
                 raise SyntaxError
+            if node.children[0].value.strip("\"") in loaded_modules:
+                # print(f"ALREDY LOADED: {node.children[0].value}")
+                return
             with open(f"{eval_parsed(node.children[0], env)}.s") as module:
                 statements = Parser(get_tokens(module.read())).statements()
+                loaded_modules.add(node.children[0].value.strip("\""))
                 for node in statements:
                     eval_parsed(node, env)
 
@@ -551,7 +613,7 @@ def run_module(modulename: str):
             elif et == TypeError:
                 print_err(f"TYPE ERROR: {e}".upper())
             elif et == AttributeError:
-                print_err(f"CANNOT CALL THIS OBJECT".upper())
+                print_err(f"ATTR_ERROR: {e}".upper())
             else:
                 print_err(str(e).upper())
         except KeyboardInterrupt as e:
@@ -559,24 +621,14 @@ def run_module(modulename: str):
 
 
 env = Environment()
-env.set("EXECUTOR_BODY", "lambda args, body, env")
-env.set("writeln", Function(-1, executor=lambda args, body, env: print(*args)))
-env.set("readln", Function(1, executor=lambda args, body, env: input(args[0])))
-env.set(
-    "length",
-    Function(
-        1,
-        executor=lambda args, body, env: len(args[0])
-    ),
-)
-env.set("envp", Function(-1, executor=lambda args, body, env: print(env.vars)))
-env.set("SYSEXEC", Function(1, executor=lambda args, body, env: eval(args[0])))
+env.set("writeln", Function(executor=lambda args, body, env: print(*args)))
+env.set("readln", Function(executor=lambda args, body, env: input(args[0])))
+env.set("SYSEXEC", Function(executor=lambda args, body, env: eval(args[0])))
 env.set(
     "REGISTER",
     Function(
-        3,
         executor=lambda args, body, env: env.set(
-            args[0], Function(args[1], executor=args[2], name=args[0])
+            args[0], Function(executor=args[1], name=args[0])
         ),
         global_executor_env=True,
     ),
@@ -584,11 +636,13 @@ env.set(
 env.set(
     "CREATE_BASIC_EXECUTOR",
     Function(
-        1,
         executor=lambda a, b, e: lambda args, body, env: eval(a[0]),
         global_executor_env=True,
     ),
 )
+
+
+loaded_modules: set[str] = set()
 
 
 if __name__ == "__main__":
