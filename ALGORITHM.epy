@@ -22,9 +22,7 @@ func elementAt(req object, req index){
     if (index > length(object)){
         ret "NULL"
     }
-    ret CALL_OBJECT(__getitem__ of object, index)
+    ret __getitem__(index) of object
 }
 
-func toLower(req string){
-    ret CALL_OBJECT(lower of SYSEXEC("str"), toString(string))
-}
+func toLower(req string){ ret lower(toString(string)) of SYSEXEC("str") }

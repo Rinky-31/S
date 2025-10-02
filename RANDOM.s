@@ -1,1 +1,0 @@
-REGISTER("random", 2, CREATE_BASIC_EXECUTOR("__import__('random').randint(*args)"))

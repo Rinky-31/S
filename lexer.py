@@ -37,7 +37,7 @@ TOKENS_REPLACE: list[tuple[str, str]] = [
     ("EQUALS_CHECK", r"=="),
     ("EQUALS", r"="),
     ("STRING_LITERAL", r"\"(?:\\.|[^\"\\])*\"|\'(?:\\.|[^\'\\])*\'"),
-    ("KEYWORD", r"(loop|for|while|func|drop|constant|enumerate|ret|load|if|elif|else|false|true|break|continue|delete|req)"),
+    ("KEYWORD", r"(loop|for|while|func|drop|enumerate|ret|load|if|elif|else|false|true|break|continue|delete|req)"),
     ("DOUBLE_DOT", r":"),
     ("COMMENT", r"\/\-"),
     ("SPACE", r"\s+"),

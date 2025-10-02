@@ -8,6 +8,9 @@ class Instruction:
     def __init__(self, type: str, value=None):
         self.type = type
         self.value = value
+    
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.type}, {self.value})"
 
 class IF:
     def __init__(self, ifs: Optional["Node"] = None, Elifs: Optional[list["Node"]] = None, Else: Optional["Node"] = None):
@@ -76,7 +79,7 @@ class Function:
         for param in self.params:
             if param.type == "REQUIRED_PARAMETER" and param.value:
                 if not any(p == param.value for p, _ in parameters):
-                    raise TypeError(f"Function missing required parameter {param.value}")
+                    raise TypeError(f"Function missing required parameter '{param.value}'")
         if self.name:
             local_env.set(self.name, self)
         if self.executor:
@@ -94,7 +97,7 @@ class Function:
                 return res.value
     
     def __repr__(self):
-        return f"func {self.name}({', '.join(self.params)}) {{ ... }}"
+        return f"func {self.name or '...'}({', '.join(param.value for param in self.params)}) {{ ... }}"
 
 
 class Node:
@@ -222,12 +225,24 @@ class Parser:
         return node
     
     def handle_attributes(self) -> Node:
-        node = self.factor()
+        node = self.after_factor()
         if self.has_next_token() and (token := self.token()).type in (
             "OF",
         ):
             self.next()
             node = Node(token.type, left=node, right=self.handle_attributes())
+        return node
+    
+    def after_factor(self) -> Node:
+        node = self.factor()
+        while self.has_next_token() and (token := self.token()).type in (
+            "LPAREN",
+        ):
+            if node.type == "KEYWORD":
+                return node
+            node = Node("CALL", left=node)
+            node = self.call_object(node)
+            self.next("RPAREN")
         return node
 
     def factor(self) -> Node:
@@ -251,11 +266,6 @@ class Parser:
                 if not self.has_next_token():
                     return Node("NAME", token.value)
                 match self.token(1).type:
-                    case "LPAREN":
-                        node = Node("CALL", token.value)
-                        node = self.call_object(node)
-                        self.next("RPAREN")
-                        return node
                     case "INCREMENT":
                         self.next()
                         self.next()
@@ -318,6 +328,9 @@ class Parser:
                         condition = self.factor()
                         body = self.parse_body()
                         return Node("LOOP", loop_type, children=[condition, Node("BODY", children=body)])
+                    case "drop":
+                        self.next()
+                        return Node("DROP", self.factor())
                 self.next()
                 return Node("KEYWORD", token.value)
             case "LBRACKET":
@@ -327,7 +340,7 @@ class Parser:
                 self.next()
                 return Node("RBRACKET")
 
-    def call_object(self, node: Node, anonymous: bool = False):
+    def call_object(self, node: Node):
         def read_parameter():
             param = self.assign_handle()
             return param
@@ -340,26 +353,18 @@ class Parser:
                 node.children.append(read_parameter())
 
         node.children = []
-        if not anonymous:
-            self.next("NAME")
         self.next("LPAREN")
         if self.token().type != "RPAREN":
             node.children.append(read_parameter())
             handle_parameters()
-        while self.has_next_token() and self.token(1).type == "LPAREN":
-            self.next()
-            self.next()
-            node = Node("ANONYMOUS_CALL", left=node, children=[])
-            if self.token().type != "RPAREN":
-                node.children.append(read_parameter())
-                handle_parameters()
         return node
 
     def parse_function(self) -> Node:
         self.next("KEYWORD")
         func_name = self.token()
-        self.next("NAME")
-        self.next("LPAREN")
+        self.next("NAME", "LPAREN")
+        if self.token().type == "LPAREN":
+            self.next("LPAREN")
         params = []
         while self.token().type != "RPAREN":
             token = self.token()
@@ -377,7 +382,7 @@ class Parser:
         body = self.parse_body()
         return Node(
             "DEFINE_FUNCTION",
-            func_name.value,
+            func_name.value if func_name.type == "NAME" else None,
             children=[Node("PARAMETERS", params), Node("BODY", children=body)],
         )
     
@@ -447,17 +452,23 @@ def eval_parsed(node: Node, env: Environment):
     if not node:
         return
     match node.type:
+        case "DROP":
+            raise Exception(eval_parsed(node.value, env))
         case "OF":
             attribute, from_object = node.left, eval_parsed(node.right, env)
             match attribute.type:
                 case "CALL":
-                    params = map(lambda a: eval_parsed(a, env), attribute.children)
-                    if isinstance(from_object, Environment):
-                        res = from_object.get(attribute.value)
-                        if hasattr(res, "exec_body"):
-                            return res.exec_body(params)
-                        return res(*params)
-                    return getattr(from_object, attribute.value)(*params)
+                    left, prev = attribute.left, attribute
+                    while left.type == "CALL":
+                        prev = left
+                        left = left.left
+                    if left.type != "NAME":
+                        raise SyntaxError("Excepted identifier")
+                    attr = getattr(from_object, left.value)
+                    if not attr:
+                        raise TypeError("Object have not this attribute")
+                    prev.left = Node("ATTRIBUTE", attr)
+                    return eval_parsed(attribute, env)
                 case "NAME":
                     if isinstance(from_object, Environment):
                         return from_object.get(attribute.value)
@@ -510,21 +521,20 @@ def eval_parsed(node: Node, env: Environment):
             return eval_parsed(node.left, env) * eval_parsed(node.right, env)
         case "UNARY_STAR":
             return eval_parsed(node.right, env) * 1
+        case "ATTRIBUTE":
+            return node.value
         case "CALL":
             parameters = node.children.copy()
             for i, val in enumerate(parameters):
                 parameters[i] = eval_parsed(val, env)
-            func: Function = env.get(node.value)
-            return func.exec_body(parameters)
-        case "ANONYMOUS_CALL":
-            parameters = node.children.copy()
-            for i, val in enumerate(parameters):
-                parameters[i] = eval_parsed(val, env)
             if node.left:
-                node.left = eval_parsed(node.left, env)
-            if type(node.left) == Function:
-                return node.left.exec_body(parameters)
-            raise TypeError("cannot call anonymous object that is not callable")
+                if node.left.type == "NAME":
+                    func = env.get(node.left.value)
+                func = eval_parsed(node.left, env)
+            #if isinstance(func, Function)
+            if hasattr(func, "exec_body"):
+                return func.exec_body(parameters)
+            return func(*parameters)
         case "EQUALS":
             if node.left.type not in ("NAME", "OF"):
                 raise SyntaxError("Invalid left operand for '='")
@@ -549,14 +559,18 @@ def eval_parsed(node: Node, env: Environment):
             func_name = node.value
             params = node.children[0].value
             body = node.children[1].children
-            env.set(func_name, Function(body, params, env, name=func_name))
+            f = Function(body, params, env, name=func_name)
+            if func_name:
+                env.set(func_name, f)
+            return f
+        
         case "LOAD_MODULE":
             if len(node.children) != 1 or node.children[0].type != "STRING_LITERAL":
                 raise SyntaxError
             if node.children[0].value.strip("\"") in loaded_modules:
                 # print(f"ALREDY LOADED: {node.children[0].value}")
                 return
-            with open(f"{eval_parsed(node.children[0], env)}.s") as module:
+            with open(f"{eval_parsed(node.children[0], env)}.pye") as module:
                 statements = Parser(get_tokens(module.read())).statements()
                 loaded_modules.add(node.children[0].value.strip("\""))
                 for node in statements:
@@ -589,7 +603,7 @@ def eval_parsed(node: Node, env: Environment):
                 env.vars.pop(node.value.value)
 
 def run_module(modulename: str):
-    with open(f"{modulename}.s") as f:
+    with open(f"{modulename}.pye") as f:
         code = f.read()
 
     print_err = lambda txt, err_type="RUNTIME ERROR": print(
@@ -607,17 +621,19 @@ def run_module(modulename: str):
         except Exception as e:
             et = type(e)
             if et == FileNotFoundError:
-                print_err("Cannot find module".upper())
+                print_err("Cannot find module")
             elif et == SyntaxError:
                 print_err(e)
             elif et == TypeError:
-                print_err(f"TYPE ERROR: {e}".upper())
+                print_err(f"TYPE ERROR: {e}")
             elif et == AttributeError:
-                print_err(f"ATTR_ERROR: {e}".upper())
+                print_err(f"ATTR_ERROR: {e}")
             else:
-                print_err(str(e).upper())
+                print_err(str(e))
+            break
         except KeyboardInterrupt as e:
             print_err("KEYBOARD INTERRUPT")
+            break
 
 
 env = Environment()
