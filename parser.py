@@ -570,7 +570,7 @@ def eval_parsed(node: Node, env: Environment):
             if node.children[0].value.strip("\"") in loaded_modules:
                 # print(f"ALREDY LOADED: {node.children[0].value}")
                 return
-            with open(f"{eval_parsed(node.children[0], env)}.pye") as module:
+            with open(f"{eval_parsed(node.children[0], env)}.epy") as module:
                 statements = Parser(get_tokens(module.read())).statements()
                 loaded_modules.add(node.children[0].value.strip("\""))
                 for node in statements:
@@ -603,7 +603,7 @@ def eval_parsed(node: Node, env: Environment):
                 env.vars.pop(node.value.value)
 
 def run_module(modulename: str):
-    with open(f"{modulename}.pye") as f:
+    with open(f"{modulename}.epy") as f:
         code = f.read()
 
     print_err = lambda txt, err_type="RUNTIME ERROR": print(
