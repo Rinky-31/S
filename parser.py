@@ -126,7 +126,7 @@ class Parser:
         self.pos = 0
     
     def skip_end(self):
-        while self.token().type in ("ENDL", "ENDEXPR"):
+        while self.has_next_token() and self.token().type in ("ENDL", "ENDEXPR"):
             self.next()
 
     def statements(self):
@@ -285,6 +285,9 @@ class Parser:
                 node = self.assign_handle()
                 self.next("RPAREN")
                 return node
+            case "LBRACKET":
+                self.next()
+                return
             case "KEYWORD":
                 if not self.has_next_token():
                     raise SyntaxError
@@ -304,7 +307,7 @@ class Parser:
                         node = self.parse_if()
                         children = [node]
                         self.skip_end()
-                        while (token := self.token()).type == "KEYWORD" and self.token().value in ("elif", "else"):
+                        while self.has_next_token() and (token := self.token()).type == "KEYWORD" and self.token().value in ("elif", "else"):
                             if token.value == "elif":
                                 parsed = self.parse_if()
                                 self.skip_end()
@@ -331,14 +334,10 @@ class Parser:
                     case "drop":
                         self.next()
                         return Node("DROP", self.factor())
+                
                 self.next()
                 return Node("KEYWORD", token.value)
-            case "LBRACKET":
-                self.next()
-                return Node("LBRACKET", right=self.assign_handle())
-            case "RBRACKET":
-                self.next()
-                return Node("RBRACKET")
+            
 
     def call_object(self, node: Node):
         def read_parameter():
@@ -405,7 +404,7 @@ class Parser:
         )
     
     def parse_body(self):
-        self.skip_end() # !!
+        self.skip_end()
         self.next("LBRACKET")
         body = []
         while self.token().type != "RBRACKET":
@@ -570,7 +569,7 @@ def eval_parsed(node: Node, env: Environment):
             if node.children[0].value.strip("\"") in loaded_modules:
                 # print(f"ALREDY LOADED: {node.children[0].value}")
                 return
-            with open(f"{eval_parsed(node.children[0], env)}.epy") as module:
+            with open(f"{eval_parsed(node.children[0], env)}.epy", encoding="utf-8") as module:
                 statements = Parser(get_tokens(module.read())).statements()
                 loaded_modules.add(node.children[0].value.strip("\""))
                 for node in statements:
@@ -603,7 +602,7 @@ def eval_parsed(node: Node, env: Environment):
                 env.vars.pop(node.value.value)
 
 def run_module(modulename: str):
-    with open(f"{modulename}.epy") as f:
+    with open(f"{modulename}.epy", encoding="utf-8") as f:
         code = f.read()
 
     print_err = lambda txt, err_type="RUNTIME ERROR": print(
