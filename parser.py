@@ -530,6 +530,7 @@ def eval_parsed(node: Node, env: Environment):
             attr_value = node.value
             node.type = node.left.type
             node.value = node.left.value
+            node.left = None
             return attr_value
         case "CALL":
             parameters = node.children.copy()
