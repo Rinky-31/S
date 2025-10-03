@@ -30,6 +30,17 @@ class IF:
                 case "_ELSE":
                     res.Else = i
         return res
+    
+class Null:
+    __i = None
+
+    def __new__(cls):
+        if cls.__i is None:
+            cls.__i = super().__new__(cls)
+        return cls.__i
+
+    def __repr__(self):
+        return self.__class__.__name__
 
 class Environment:
     def __init__(
@@ -289,9 +300,9 @@ class Parser:
                 node = self.assign_handle()
                 self.next("RPAREN")
                 return node
-            case "LBRACKET":
+            case "LBRACKET" | "RBRACKET":
                 self.next()
-                return
+                return Node(token.type, token.value)
             case "KEYWORD":
                 if not self.has_next_token():
                     raise SyntaxError
@@ -432,24 +443,15 @@ def exec_body(body_node: Node, env):
         
 
 def exec_loop_body(condition_node: Node, body_node: Node, env):
-    nodes = list(filter(None, body_node.children))
-    running = True
-    while running and eval_parsed(condition_node, env):
-        for index, i in enumerate(nodes):
-            i = nodes[index]
-            ret = eval_parsed(i, env)
-            if isinstance(ret, Instruction):
-                if ret.type == "RETURN" and index + 1 < len(nodes):
-                    return Instruction(
-                        "RETURN_VALUE", eval_parsed(nodes[index + 1], env)
-                    )
-                if ret.type == "RETURN_VALUE":
-                    return ret
-                elif ret.type == "BREAK":
-                    running = False
-                    break
-                elif ret.type == "CONTINUE":
-                    break
+    while eval_parsed(condition_node, env):
+        ret = exec_body(body_node, env)
+        if isinstance(ret, Instruction):
+            if ret.type == "RETURN_VALUE":
+                return ret
+            elif ret.type == "BREAK":
+                break
+            elif ret.type == "CONTINUE":
+                continue
 
 def eval_parsed(node: Node, env: Environment):
     if not node:
@@ -505,7 +507,7 @@ def eval_parsed(node: Node, env: Environment):
         case "POST_DECREMENT":
             return eval_parsed(node.left, env) - 1
         case "NAME":
-            return val if (val := env.get(node.value)) is not None else "NULL"
+            return val if (val := env.get(node.value)) is not None else Null()
         case "NUMBER":
             return int(node.value)
         case "STRING_LITERAL":
@@ -539,8 +541,8 @@ def eval_parsed(node: Node, env: Environment):
                 return func.exec_body(parameters)
             return func(*parameters)
         case "EQUALS":
-            if node.left.type not in ("NAME", "OF"):
-                raise SyntaxError("Invalid left operand for '='")
+            if node.left.type not in ("NAME", "OF") or node.left.type == "NAME" and node.left.value in reserved_names:
+                raise SyntaxError(f"Invalid left operand for '=': {node.left.value}")
             if node.left.type == "OF":
                 attr_name = node.left.left.value
                 obj = eval_parsed(node.left.right, env)
@@ -588,7 +590,7 @@ def eval_parsed(node: Node, env: Environment):
                 If: Node = If.children[0].children
                 if eval_parsed(If.children[0].value, env):
                     return exec_body(If.children[-1], env)
-            return eval_parsed(Else.children[0], env) if Else else "NULL"
+            return eval_parsed(Else.children[0], env) if Else else Null()
         case "LOOP":
             condition, body = node.children
             return exec_loop_body(condition, body, env)
@@ -661,8 +663,12 @@ env.set(
         executor_min_argcount=1
     ),
 )
+env.set("Null", Null())
+env.set("true", 1)
+env.set("false", 0)
 
 
+reserved_names: list[str] = ["Null", "false", "true"]
 loaded_modules: set[str] = set()
 
 

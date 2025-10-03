@@ -39,7 +39,7 @@ TOKENS_REPLACE: list[tuple[str, str]] = [
     ("STRING_LITERAL", r"\"(?:\\.|[^\"\\])*\"|\'(?:\\.|[^\'\\])*\'"),
     (
         "KEYWORD",
-        r"loop|for|while|func|drop|enumerate|ret|load|if|elif|else|false|true|break|continue|delete|req|цикл|для|поки|функція|викинути|перечислення|повернути|завантажити|якщо|інакшеякщо|інакше|брехня|правда|зупинити|пропустити|видалити|необхідний",
+        r"loop|for|while|func|drop|enumerate|ret|load|if|elif|else|break|continue|delete|req|цикл|для|поки|функція|викинути|перечислення|повернути|завантажити|якщо|інакшеякщо|інакше|зупинити|пропустити|видалити|необхідний",
     ),
     ("DOUBLE_DOT", r":"),
     ("COMMENT", r"\/\-"),
@@ -51,7 +51,7 @@ TOKENS_REPLACE: list[tuple[str, str]] = [
 ]
 
 TRANSLATED_TOKENS_NAME = {
-    "loop": "цикл",
+    "цикл": "loop",
     "для": "for",
     "поки": "while",
     "функція": "func",

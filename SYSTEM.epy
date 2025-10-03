@@ -1,7 +1,13 @@
-REGISTER("CANN", CREATE_BASIC_EXECUTOR("repr(args[0])"))
-REGISTER("contains", CREATE_BASIC_EXECUTOR("int(args[1] in args[0])"))
-REGISTER("not", CREATE_BASIC_EXECUTOR("int(not args[0])"))
 REGISTER("strformat", CREATE_BASIC_EXECUTOR("args[0].format(*args[1:])"))
-REGISTER("ATTRIBUTE", CREATE_BASIC_EXECUTOR("getattr(*args, 'NULL')"))
-REGISTER("CMD", CREATE_BASIC_EXECUTOR("__import__('os').system(args[0])"))
-REGISTER("CALL_OBJECT", CREATE_BASIC_EXECUTOR("args[0](*args[1:])"))
+
+func CMD(req p){
+    ret system(p) of SYSEXEC("__import__('os')")
+}
+
+func typeof(object){
+    type = SYSEXEC("str")(__name__ of SYSEXEC("type")(object))
+    if (type == "str"){ ret "String" }
+    if (type == "int"){ ret "Integer" }
+    if (type == "float"){ ret "Float" }
+    ret capitalize(type) of SYSEXEC("str")
+}
