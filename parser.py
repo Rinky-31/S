@@ -472,7 +472,7 @@ def eval_parsed(node: Node, env: Environment):
                     attr = getattr(from_object, left.value)
                     if not attr:
                         raise TypeError("Object have not this attribute")
-                    prev.left = Node("ATTRIBUTE", attr)
+                    prev.left = Node("ATTRIBUTE", attr, left)
                     return eval_parsed(attribute, env)
                 case "NAME":
                     if isinstance(from_object, Environment):
@@ -527,7 +527,10 @@ def eval_parsed(node: Node, env: Environment):
         case "UNARY_STAR":
             return eval_parsed(node.right, env) * 1
         case "ATTRIBUTE":
-            return node.value
+            attr_value = node.value
+            node.type = node.left.type
+            node.value = node.left.value
+            return attr_value
         case "CALL":
             parameters = node.children.copy()
             for i, val in enumerate(parameters):
@@ -617,6 +620,7 @@ def run_module(modulename: str):
     try:
         parser = Parser(t := get_tokens(code))
         expr = parser.statements()
+        n = expr[0]
     except SyntaxError as e:
         print_err(e, "TOKENIZATION ERROR")
         exit()
