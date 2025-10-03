@@ -1,2 +1,11 @@
-REGISTER("toNumber", CREATE_BASIC_EXECUTOR("int(args[0])"))
-REGISTER("toString", CREATE_BASIC_EXECUTOR("str(args[0])"))
+func toInteger(req object){
+    ret SYSEXEC("int")(object)
+}
+
+func toFloat(req object){
+    ret SYSEXEC("float")(object)
+}
+
+func toString(req object){
+    ret SYSEXEC("str")(object)
+}

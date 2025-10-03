@@ -63,6 +63,7 @@ class Function:
         executor=None,
         name: str = None,
         global_executor_env: bool = False,
+        executor_min_argcount: int = 0
     ):
         self.body = list(filter(None, body))
         self.executor = executor
@@ -70,6 +71,7 @@ class Function:
         self.is_global_executor = global_executor_env
         self.params = params or []
         self.name = name
+        self.executor_argcount = executor_min_argcount
 
     def exec_body(self, args: list):
         args = list(filter(lambda a: a is not None, args))
@@ -85,6 +87,8 @@ class Function:
         if self.executor:
             if self.is_global_executor:
                 local_env = env
+            if len(args) < self.executor_argcount:
+                raise TypeError(f"Not enought arguments. Excepted {self.executor_argcount}, got {len(parameters)}")
             return self.executor(args, self.body, local_env)
         for i, expr in enumerate(self.body):
             res = eval_parsed(expr, local_env)
@@ -333,7 +337,7 @@ class Parser:
                         return Node("LOOP", loop_type, children=[condition, Node("BODY", children=body)])
                     case "drop":
                         self.next()
-                        return Node("DROP", self.factor())
+                        return Node("DROP", self.assign_handle())
                 
                 self.next()
                 return Node("KEYWORD", token.value)
@@ -637,15 +641,16 @@ def run_module(modulename: str):
 
 env = Environment()
 env.set("writeln", Function(executor=lambda args, body, env: print(*args)))
-env.set("readln", Function(executor=lambda args, body, env: input(args[0])))
-env.set("SYSEXEC", Function(executor=lambda args, body, env: eval(args[0])))
+env.set("readln", Function(executor=lambda args, body, env: input(args[0] if args else ">> ")))
+env.set("SYSEXEC", Function(executor=lambda args, body, env: eval(args[0]), executor_min_argcount=1))
 env.set(
     "REGISTER",
     Function(
         executor=lambda args, body, env: env.set(
-            args[0], Function(executor=args[1], name=args[0])
+            args[0], Function(executor=args[1], name=args[0], executor_min_argcount=args[2] if len(args) > 2 else None)
         ),
         global_executor_env=True,
+        executor_min_argcount=2
     ),
 )
 env.set(
@@ -653,6 +658,7 @@ env.set(
     Function(
         executor=lambda a, b, e: lambda args, body, env: eval(a[0]),
         global_executor_env=True,
+        executor_min_argcount=1
     ),
 )
 
