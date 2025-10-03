@@ -1,1 +1,3 @@
-REGISTER("random", CREATE_BASIC_EXECUTOR("__import__('random').randint(*args)"))
+func random(req a, req b){
+    ret randint(a, b) of SYSEXEC("__import__('random')")
+}
