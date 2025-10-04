@@ -1,7 +1,9 @@
 load "SYSTEM"
 load "CONVERT"
 
-REGISTER("slice", CREATE_BASIC_EXECUTOR("args[0][slice(*args[1:])]"))
+func slice(obj, req start, req end, req step){
+    ret __getitem__(SYSEXEC("slice")(start, end, step)) of obj
+}
 
 func max(req a, req b){
     if (a > b){

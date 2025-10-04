@@ -72,7 +72,7 @@ class Function:
         _env: Optional[Environment] = None,
         *,
         executor=None,
-        name: str = None,
+        name: Optional[str] = None,
         global_executor_env: bool = False,
         executor_min_argcount: int = 0
     ):
@@ -84,9 +84,9 @@ class Function:
         self.name = name
         self.executor_argcount = executor_min_argcount
 
-    def exec_body(self, args: list):
+    def exec_body(self, args: list, env: Optional[Environment] = None):
         args = list(filter(lambda a: a is not None, args))
-        local_env = Environment(parent=self.env)
+        local_env = Environment(parent=(env or self.env))
         params_name = [param.value for param in self.params]
         local_env.vars.update(parameters := tuple(zip(params_name, args)))
         for param in self.params:
@@ -113,6 +113,66 @@ class Function:
     
     def __repr__(self):
         return f"func {self.name or '...'}({', '.join(param.value for param in self.params)}) {{ ... }}"
+    
+
+class ClassPrototype:
+    def __init__(
+        self,
+        body: list["Node"],
+        _env: Environment,
+        *,
+        name: Optional[str] = None,
+    ):
+        self.body = list(filter(None, body))
+        self.env = Environment(parent=_env)
+        self.name = name
+        exec_body(Node("BODY", children=self.body), self.env)
+
+    def exec_body(self, params):
+       instance = ClassInstance(self.env, name=self.name, params=params, constructor=self.env.vars.get("ctor"), destructor=self.env.vars.get("dtor"))
+       return instance
+    
+    def __getattr__(self, name: str):
+        return self.env.vars.get(name) or Null()
+    
+    def set_attr(self, name: str, value):
+        self.env.set(name, value)
+    
+    def __repr__(self):
+        return f"class prototype {self.name or '...'} {{ ... }}"
+    
+
+class ClassInstance:
+    def __init__(
+        self,
+        _env: Optional[Environment] = None,
+        *,
+        name: Optional[str] = None,
+        params: Optional[list] = None,
+        constructor: Optional[Function] = None,
+        destructor: Optional[Function] = None
+    ):
+        self.env = Environment(parent=_env or env)
+        self.name = name
+        self.params = params
+        self.env.set("this", self)
+        if constructor and isinstance(constructor, Function):
+            constructor.exec_body(params, self.env)
+        self.destructor = destructor
+    
+    def __getattr__(self, name: str):
+        return self.env.vars.get(name) or self.env.parent.vars.get(name) or Null()
+    
+    def set_attr(self, name: str, value):
+        self.env.set(name, value)
+
+    def delete(self):
+        if isinstance(self.destructor, Function):
+            self.destructor.exec_body([], self.env)
+
+    
+    def __repr__(self):
+        return f"instance of {self.name or '...'} {{ ... }}"
 
 
 class Node:
@@ -214,6 +274,7 @@ class Parser:
             "GREATER_EQ",
             "LESS_EQ",
             "EQUALS_CHECK",
+            "NOT_EQUALS_CHECK",
         ):
             self.next()
             node = Node(token.type, left=node, right=self.pm())
@@ -346,6 +407,8 @@ class Parser:
                         condition = self.factor()
                         body = self.parse_body()
                         return Node("LOOP", loop_type, children=[condition, Node("BODY", children=body)])
+                    case "class":
+                        return self.parse_class()
                     case "drop":
                         self.next()
                         return Node("DROP", self.assign_handle())
@@ -400,8 +463,17 @@ class Parser:
             children=[Node("PARAMETERS", params), Node("BODY", children=body)],
         )
     
-    def parse_loop(self):
-        ...
+    def parse_class(self):
+        self.next("KEYWORD")
+        class_name = self.token()
+        if class_name.type  == "NAME":
+            self.next()
+        body = self.parse_body()
+        return Node(
+            "DEFINE_CLASS",
+            class_name.value if class_name.type == "NAME" else None,
+            children=[Node("BODY", children=body)]
+        )
 
     def parse_if(self) -> Node:
         self.next("KEYWORD")
@@ -473,7 +545,7 @@ def eval_parsed(node: Node, env: Environment):
                     if not attr:
                         raise TypeError("Object have not this attribute")
                     prev.left = Node("ATTRIBUTE", attr, left)
-                    return eval_parsed(attribute, env)
+                    return eval_parsed(attribute, env if not isinstance(from_object, (ClassPrototype, ClassInstance)) else from_object.env)
                 case "NAME":
                     if isinstance(from_object, Environment):
                         return from_object.get(attribute.value)
@@ -498,6 +570,8 @@ def eval_parsed(node: Node, env: Environment):
             return int(bool(eval_parsed(node.left, env) <= eval_parsed(node.right, env)))
         case "EQUALS_CHECK":
             return int(bool(eval_parsed(node.left, env) == eval_parsed(node.right, env)))
+        case "NOT_EQUALS_CHECK":
+            return int(bool(eval_parsed(node.left, env) != eval_parsed(node.right, env)))
         case "PRE_INCREMENT":
             return eval_parsed(node.left, env) + 1
         case "POST_INCREMENT":
@@ -526,23 +600,18 @@ def eval_parsed(node: Node, env: Environment):
             return eval_parsed(node.left, env) * eval_parsed(node.right, env)
         case "UNARY_STAR":
             return eval_parsed(node.right, env) * 1
-        case "ATTRIBUTE":
-            attr_value = node.value
-            node.type = node.left.type
-            node.value = node.left.value
-            node.left = None
-            return attr_value
         case "CALL":
             parameters = node.children.copy()
             for i, val in enumerate(parameters):
                 parameters[i] = eval_parsed(val, env)
             if node.left:
-                if node.left.type == "NAME":
-                    func = env.get(node.left.value)
-                func = eval_parsed(node.left, env)
+                if node.left.type == "ATTRIBUTE":
+                    func = node.left.value
+                else:
+                    func = eval_parsed(node.left, env)
             #if isinstance(func, Function)
             if hasattr(func, "exec_body"):
-                return func.exec_body(parameters)
+                return func.exec_body(parameters) if not isinstance(func, Function) else func.exec_body(parameters, env)
             return func(*parameters)
         case "EQUALS":
             if node.left.type not in ("NAME", "OF") or node.left.type == "NAME" and node.left.value in reserved_names:
@@ -550,7 +619,11 @@ def eval_parsed(node: Node, env: Environment):
             if node.left.type == "OF":
                 attr_name = node.left.left.value
                 obj = eval_parsed(node.left.right, env)
+                if hasattr(obj, "set_attr"):
+                    obj.set_attr(attr_name, eval_parsed(node.right, env))
+                    return
                 setattr(obj, attr_name, eval_parsed(node.right, env))
+                return
             if node.right.type == "LOAD_MODULE":
                 if node.right.children[0].value.strip("\"") in loaded_modules:
                     return
@@ -573,17 +646,30 @@ def eval_parsed(node: Node, env: Environment):
                 env.set(func_name, f)
             return f
         
+        case "DEFINE_CLASS":
+            body = node.children[0].children
+            cls = ClassPrototype(body, env, name=node.value)
+            if node.value:
+                env.set(node.value, cls)
+            return cls
+            
+        
         case "LOAD_MODULE":
             if len(node.children) != 1 or node.children[0].type != "STRING_LITERAL":
                 raise SyntaxError
-            if node.children[0].value.strip("\"") in loaded_modules:
+            name = node.children[0].value.strip("\"")
+            if name in loaded_modules:
                 # print(f"ALREDY LOADED: {node.children[0].value}")
+                for key, val in loaded_modules[name].vars.items():
+                    env.set(key, val)
                 return
             with open(f"{eval_parsed(node.children[0], env)}.epy", encoding="utf-8") as module:
                 statements = Parser(get_tokens(module.read())).statements()
-                loaded_modules.add(node.children[0].value.strip("\""))
+                loaded_modules[name] = (_e := Environment(parent=env))
                 for node in statements:
-                    eval_parsed(node, env)
+                    eval_parsed(node, _e)
+                for key, val in _e.vars.items():
+                    env.set(key, val)
 
         case "IF_STATEMENT":
             node: IF = node.value
@@ -609,6 +695,8 @@ def eval_parsed(node: Node, env: Environment):
             
         case "DELETE":
             if node.value.value in env.vars:
+                if hasattr(obj := env.vars[node.value.value], "delete"):
+                    obj.delete()
                 env.vars.pop(node.value.value)
 
 def run_module(modulename: str):
@@ -621,7 +709,6 @@ def run_module(modulename: str):
     try:
         parser = Parser(t := get_tokens(code))
         expr = parser.statements()
-        n = expr[0]
     except SyntaxError as e:
         print_err(e, "TOKENIZATION ERROR")
         exit()
@@ -631,7 +718,7 @@ def run_module(modulename: str):
         except Exception as e:
             et = type(e)
             if et == FileNotFoundError:
-                print_err("Cannot find module")
+                print_err(f"PATH ERROR: {e}")
             elif et == SyntaxError:
                 print_err(e)
             elif et == TypeError:
@@ -650,31 +737,12 @@ env = Environment()
 env.set("writeln", Function(executor=lambda args, body, env: print(*args)))
 env.set("readln", Function(executor=lambda args, body, env: input(args[0] if args else ">> ")))
 env.set("SYSEXEC", Function(executor=lambda args, body, env: eval(args[0]), executor_min_argcount=1))
-env.set(
-    "REGISTER",
-    Function(
-        executor=lambda args, body, env: env.set(
-            args[0], Function(executor=args[1], name=args[0], executor_min_argcount=args[2] if len(args) > 2 else None)
-        ),
-        global_executor_env=True,
-        executor_min_argcount=2
-    ),
-)
-env.set(
-    "CREATE_BASIC_EXECUTOR",
-    Function(
-        executor=lambda a, b, e: lambda args, body, env: eval(a[0]),
-        global_executor_env=True,
-        executor_min_argcount=1
-    ),
-)
 env.set("Null", Null())
 env.set("true", 1)
 env.set("false", 0)
 
-
-reserved_names: list[str] = ["Null", "false", "true"]
-loaded_modules: set[str] = set()
+reserved_names: list[str] = ["Null", "false", "true", "this"]
+loaded_modules: dict[str, Environment] = {}
 
 
 if __name__ == "__main__":

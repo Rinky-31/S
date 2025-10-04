@@ -1,5 +1,3 @@
-REGISTER("strformat", CREATE_BASIC_EXECUTOR("args[0].format(*args[1:])"))
-
 func CMD(req p){
     ret system(p) of SYSEXEC("__import__('os')")
 }
