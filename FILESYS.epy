@@ -4,7 +4,7 @@ load "ALGORITHM"
 
 class File {
     func ctor(req name, spec){
-        file of this = SYSEXEC("open")(name, value of if (spec != Null) { ret spec } else {ret "r" })
+        file of this = SYSEXEC("open")(name, value of if (spec != Null) { ret spec } else { ret "r" })
     }
 
     func write(string){
@@ -19,7 +19,7 @@ class File {
     }
 
     func dtor(){
-        close() of this
+        close()
         delete file
     }
 }

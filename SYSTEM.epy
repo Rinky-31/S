@@ -1,11 +1,30 @@
+func SYSIMPORT(req module){
+    ret SYSEXEC(format(module) of "__import__('{}')")
+}
+
 func CMD(req p){
-    ret system(p) of SYSEXEC("__import__('os')")
+    ret system(p) of SYSIMPORT("os")
+}
+
+
+func gc(){
+    collect() of SYSEXEC("__import__('gc')")
 }
 
 func typeof(object){
-    type = SYSEXEC("str")(__name__ of SYSEXEC("type")(object))
-    if (type == "str"){ ret "String" }
-    if (type == "int"){ ret "Integer" }
-    if (type == "float"){ ret "Float" }
-    ret capitalize(type) of SYSEXEC("str")
+    switch(type = SYSEXEC("str")(__name__ of SYSEXEC("type")(object))){
+        case ("str"){
+            ret "String"
+        }
+        case ("int"){
+            ret "Integer"
+        }
+        case ("float"){
+            ret "float"
+        }
+        another {
+            ret capitalize(type) of SYSEXEC("str")
+        }
+    }
+    
 }

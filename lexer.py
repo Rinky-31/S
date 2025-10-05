@@ -14,6 +14,7 @@ class Token:
 
 
 TOKENS_REPLACE: list[tuple[str, str]] = [
+    ("FLOAT_NUMBER", r"\d+\.\d+"),
     ("NUMBER", r"\d+"),
     ("ENDEXPR", r";"),
     ("ENDL", r"\n"),
@@ -37,18 +38,20 @@ TOKENS_REPLACE: list[tuple[str, str]] = [
     ("EQUALS_CHECK", r"=="),
     ("NOT_EQUALS_CHECK", r"!="),
     ("EQUALS", r"="),
-    ("STRING_LITERAL", r"\"(?:\\.|[^\"\\])*\"|\'(?:\\.|[^\'\\])*\'"),
+    ("STRING_LITERAL", r"([\"'])(?:\\.|(?!\1).)*\1"),
     (
         "KEYWORD",
-        r"loop|for|while|func|class|drop|enumerate|ret|load|if|elif|else|break|continue|delete|req|цикл|для|поки|функція|клас|викинути|перечислення|повернути|завантажити|якщо|інакшеякщо|інакше|зупинити|пропустити|видалити|необхідний",
+        r"\b(loop|for|while|func|class|drop|ret|load|if|elif|else|switch|case|another|break|continue|delete|req|цикл|для|поки|функція|клас|викинути|повернути|завантажити|якщо|інакшеякщо|інакше|зупинити|пропустити|видалити|необхідний)\b",
     ),
     ("DOUBLE_DOT", r":"),
-    ("COMMENT", r"\/\-"),
+    ("COMMENT", r"\\\\"),
     ("SPACE", r"\s+"),
     ("NAME", r"\w+"),
     ("COMMA", r","),
     ("LBRACKET", r"{"),
     ("RBRACKET", r"}"),
+    ("LSQBRACKET", r"\["),
+    ("RSQBRACKET", r"\]"),
 ]
 
 TRANSLATED_TOKENS_NAME = {
@@ -79,9 +82,9 @@ TRANSLATED_TOKENS_NAME = {
     "цей": "this",
 }
 
+
 def get_tokens(code: str) -> list[Token]:
     tokens: list[Token] = []
-
     while code:
         for type, regex in TOKENS_REPLACE:
             if res := match(regex, code):
@@ -91,5 +94,6 @@ def get_tokens(code: str) -> list[Token]:
                 code = code[len(res) :]
                 break
         else:
+            print(code[0])
             raise SyntaxError(f"Unexcepted token: {code[0]}")
     return tokens
