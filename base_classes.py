@@ -1,3 +1,32 @@
+from typing import Optional
+
+
+class Environment:
+    def __init__(
+        self, vars: Optional[dict[str]] = None, parent: Optional["Environment"] = None
+    ):
+        self.vars = vars or {}
+        self.parent = parent
+
+    def set(self, varname: str, value):
+        self.vars[varname] = value
+
+    def get(self, varname: str):
+        env = self
+        res = env.vars.get(varname)
+        while res is None and env.parent:
+            env = env.parent
+            res = env.vars.get(varname)
+        return res
+
+    def get_attr(self, name):
+        return self.get(name)
+
+    def __repr__(self):
+        res = "\n" + "\n".join(self.vars) + "\n"
+        return f"{self.__class__.__name__}({res})"
+
+
 class Base:
     def __init__(self):
         self.name = getattr(self, "name", self.__class__.__name__)

@@ -1,7 +1,14 @@
 from lexer import Token, get_tokens
 from typing import Optional
+from sys import argv
 from base_classes import *
 
+
+log_mode = False
+
+def log(text: str):
+    if log_mode:
+        print(f"\033[33m[LOG]: \033[32m{text}\033[0m")
 
 class Instruction:
     def __init__(self, type: str, value=None):
@@ -22,6 +29,7 @@ class IF:
         self.If = ifs
         self.Elifs = Elifs or []
         self.Else = Else
+        log(f"Created if ({len(self.Elifs)} elifs)")
 
     @staticmethod
     def from_list(lst: list["Node"]):
@@ -47,16 +55,17 @@ class Switch:
         self.cases = cases or []
         self.another = another
         self.value = value
+        log(f"Created switch ({len(self.cases)} cases)")
 
     @staticmethod
     def from_list(lst: list["Node"]):
-        res = Switch()
+        cases, another = [], None
         for i in lst:
             if i.type == "_ANOTHER":
-                res.another = i
+                another = i
             elif i.type == "_CASE":
-                res.cases.append(i)
-        return res
+                cases.append(i)
+        return Switch(cases, another)
 
 
 class Null:
@@ -72,31 +81,6 @@ class Null:
 
     def __bool__(self):
         return False
-
-
-class Environment:
-    def __init__(
-        self, vars: Optional[dict[str]] = None, parent: Optional["Environment"] = None
-    ):
-        self.vars = vars or {}
-        self.parent = parent
-
-    def set(self, varname: str, value):
-        self.vars[varname] = value
-
-    def get(self, varname: str, env: Optional["Environment"] = None):
-        env = env or self
-        res = env.vars.get(varname)
-        if res is None and env.parent:
-            res = self.get(varname, env.parent)
-        return res
-
-    def get_attr(self, name):
-        return self.get(name)
-
-    def __repr__(self):
-        res = "\n" + "\n".join(self.vars) + "\n"
-        return f"{self.__class__.__name__}({res})"
 
 
 class Function(Base):
@@ -119,8 +103,10 @@ class Function(Base):
         self.params = params or []
         self.name = name
         self.executor_argcount = executor_min_argcount
+        log(f"Created function {self}")
 
     def _call(self, args: list, env: Optional[Environment] = None):
+        log(f"Calling function {self}")
         args = list(filter(lambda a: a is not None, args)) if args else []
         local_env = Environment(parent=(env or self.env))
         params_name = [param.value for param in self.params]
@@ -140,6 +126,7 @@ class Function(Base):
                 raise TypeError(
                     f"Not enought arguments. Excepted {self.executor_argcount}, got {len(parameters)}"
                 )
+            log("Calling function executor")
             return self.executor(args, self.body, local_env)
         for i, expr in enumerate(self.body):
             res = eval_parsed(expr, local_env)
@@ -147,9 +134,13 @@ class Function(Base):
                 continue
             if expr.type == "KEYWORD" and expr.value == "ret":
                 if i + 1 < len(self.body):
-                    return eval_parsed(self.body[i + 1], local_env)
+                    res = eval_parsed(self.body[i + 1], local_env)
+                    log(f"Return {res} from {self}")
+                    return res
             if isinstance(res, Instruction) and res.type == "RETURN_VALUE":
+                log(f"Return {res.value} from {self}")
                 return res.value
+        log(f"Return Null from {self}")
         return Null()
 
     def __repr__(self):
@@ -164,11 +155,13 @@ class ClassPrototype(Base):
         *,
         name: Optional[str] = None,
     ):
+        log(f"Creating class prototype")
         super().__init__()
         self.body = list(filter(lambda a: a is not None, body))
         self.env = Environment(parent=_env)
         self.name = name
         exec_body(Node("BODY", children=self.body), self.env)
+        log(f"Created {self}")
 
     def _call(self, params):
         instance = ClassInstance(
@@ -202,6 +195,7 @@ class ClassInstance(Base):
         constructor: Optional[Function] = None,
         destructor: Optional[Function] = None,
     ):
+        log(f"Creating class instance")
         super().__init__()
         self.env = Environment(parent=_env or env)
         self.name = name or self.name
@@ -210,6 +204,7 @@ class ClassInstance(Base):
         if constructor and isinstance(constructor, Function):
             constructor._call(params, self.env)
         self.destructor = destructor
+        log(f"Created instance of {self.name}")
 
     def get_attr(self, name: str):
         res = self.env.vars.get(name) or self.env.parent.vars.get(name) or Null()
@@ -364,15 +359,6 @@ class Parser:
 
     def factor(self) -> Node:
         token = self.token()
-        if token.type == "COMMENT":
-            self.next()
-            while self.has_next_token() and self.token().type != "COMMENT":
-                self.next()
-            if self.has_next_token():
-                self.next()
-            elif self.token().type != "COMMENT":
-                raise SyntaxError("Commentary was not closed")
-            token = self.token()
         if not self.has_next_token():
             return Node(token.type, token.value)
         match token.type:
@@ -552,6 +538,7 @@ class Parser:
         self.next("KEYWORD")
         func_name = self.token()
         self.next("NAME", "LPAREN")
+        log(f"Declaration function {func_name.value if func_name.type != 'LPAREN' else '...'}")
         if self.token().type == "LPAREN":
             self.next("LPAREN")
         params = []
@@ -754,12 +741,9 @@ def eval_parsed(node: Node, env: Environment):
             node.value = name
             return value
         case "CALL" | "GET_ITEM":
-            parameters = node.children.copy()
-            for i, val in enumerate(parameters):
-                parameters[i] = eval_parsed(val, env)
+            parameters = [eval_parsed(val, env) for val in node.children]
             if node.left:
                 func = eval_parsed(node.left, env)
-            # if isinstance(func, Function)
             if node.type == "CALL":
                 if hasattr(func, "get_attr") and (call := func.get_attr("_call")):
                     return call._call(parameters) if hasattr(call, "_call") else call(parameters)
@@ -820,19 +804,22 @@ def eval_parsed(node: Node, env: Environment):
                 raise SyntaxError
             name = node.children[0].value.strip('"')
             if name in loaded_modules:
-                # print(f"ALREDY LOADED: {node.children[0].value}")
+                log(f"Already loaded: {node.children[0].value}")
                 for key, val in loaded_modules[name].vars.items():
                     env.set(key, val)
                 return
+            log(f"Loading module {name}")
             with open(
                 f"{eval_parsed(node.children[0], env)}.epy", encoding="utf-8"
             ) as module:
                 statements = Parser(get_tokens(module.read())).statements()
+                log(f"Got {len(statements)} nodes for exex")
                 loaded_modules[name] = (_e := Environment(parent=env))
                 for node in statements:
                     eval_parsed(node, _e)
                 for key, val in _e.vars.items():
                     env.set(key, val)
+            log(f"Loaded module {name}")
 
         case "IF_STATEMENT":
             node: IF = node.value
@@ -861,12 +848,12 @@ def eval_parsed(node: Node, env: Environment):
                     return (
                         res
                         if (res := exec_body(case.children[-1], env)) is not None
-                        else Instruction("RETURN_VALUE", Null())
+                        else Null()
                     )
             return (
                 eval_parsed(another.children[0], env)
                 if another
-                else Instruction("RETURN_VALUE", Null())
+                else Null()
             )
 
         case "LOOP":
@@ -883,6 +870,7 @@ def eval_parsed(node: Node, env: Environment):
 
         case "DELETE":
             if node.value.value in env.vars:
+                log(f"Deleting {node.value.value}")
                 if hasattr(obj := env.vars[node.value.value], "delete"):
                     obj.delete()
                 env.vars.pop(node.value.value)
@@ -891,13 +879,14 @@ def eval_parsed(node: Node, env: Environment):
 def run_module(modulename: str):
     with open(f"{modulename}.epy", encoding="utf-8") as f:
         code = f.read()
-
+    log("Program started")
     print_err = lambda txt, err_type="RUNTIME ERROR": print(
         f"\033[31m[{err_type}]:\033[33m {txt}\033[0m"
     )
     try:
         parser = Parser(t := get_tokens(code))
         expr = parser.statements()
+        log(f"Got {len(expr)} nodes for exec")
     except SyntaxError as e:
         print_err(e, "TOKENIZATION ERROR")
         exit()
@@ -920,6 +909,7 @@ def run_module(modulename: str):
         except KeyboardInterrupt as e:
             print_err("KEYBOARD INTERRUPT")
             break
+    log("Program end")
 
 
 env = Environment()
@@ -937,7 +927,8 @@ env.set(
                 )
                 for a in args
             )
-        )
+        ),
+        name="writeln"
     ),
 )
 env.set(
@@ -955,6 +946,8 @@ env.set("false", 0)
 reserved_names: list[str] = ["Null", "false", "true", "this"]
 loaded_modules: dict[str, Environment] = {}
 
-
 if __name__ == "__main__":
+    _, *flags = argv
+    if flags:
+        log_mode = flags[0] == "--log"
     run_module("main")

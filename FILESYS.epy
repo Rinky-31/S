@@ -3,7 +3,7 @@ load "CONVERT"
 load "ALGORITHM"
 
 class File {
-    func ctor(req name, spec){
+    func _ctor(req name, spec){
         file of this = SYSEXEC("open")(name, value of if (spec != Null) { ret spec } else { ret "r" })
     }
 
@@ -18,7 +18,7 @@ class File {
         ret close() of file
     }
 
-    func dtor(){
+    func _dtor(){
         close()
         delete file
     }

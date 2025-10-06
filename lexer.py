@@ -85,15 +85,19 @@ TRANSLATED_TOKENS_NAME = {
 
 def get_tokens(code: str) -> list[Token]:
     tokens: list[Token] = []
+    comment = False
     while code:
         for type, regex in TOKENS_REPLACE:
             if res := match(regex, code):
                 res = res.group(0)
-                if type != "SPACE":
+                if type == "COMMENT":
+                    comment = not comment
+                elif type != "SPACE" and not comment:
                     tokens.append(Token(type, TRANSLATED_TOKENS_NAME.get(res, res)))
                 code = code[len(res) :]
                 break
         else:
-            print(code[0])
             raise SyntaxError(f"Unexcepted token: {code[0]}")
+    if comment:
+        raise SyntaxError("Commentary was not closed")
     return tokens
