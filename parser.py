@@ -209,6 +209,8 @@ class ClassInstance(Base):
     def get_attr(self, name: str):
         res = self.env.vars.get(name) or self.env.parent.vars.get(name) or Null()
         if not res:
+            if (g := self.env.parent.vars.get("_get_attr")):
+                return getattr(g, "_call", g)([name])
             return res
         if isinstance(res, (Function)):
             return lambda args = None: res._call(args, self.env)
@@ -751,7 +753,7 @@ def eval_parsed(node: Node, env: Environment):
                     return getattr(call, "_call", call)(parameters)
                 return func(*parameters)
             elif node.type == "GET_ITEM":
-                if hasattr(func, "_get_item") (call := func.get_attr("_get_item")):
+                if hasattr(func, "get_attr") and (call := func.get_attr("_get_item")):
                     return getattr(call, "_call", call)(parameters)
                 return func[*parameters]
         case "EQUALS":
