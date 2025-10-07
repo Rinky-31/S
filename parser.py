@@ -126,7 +126,7 @@ class Function(Base):
                 raise TypeError(
                     f"Not enought arguments. Excepted {self.executor_argcount}, got {len(parameters)}"
                 )
-            log("Calling function executor")
+            log(f"Calling function {self.name or '...'} executor")
             return self.executor(args, self.body, local_env)
         for i, expr in enumerate(self.body):
             res = eval_parsed(expr, local_env)
