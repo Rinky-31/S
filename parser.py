@@ -362,6 +362,8 @@ class Parser:
         if not self.has_next_token():
             return Node(token.type, token.value)
         match token.type:
+            case "COMMA":
+                raise SyntaxError("Unexcepted token: ','")
             case "PLUS" | "MINUS" | "STAR" | "SLASH":
                 self.next()
                 return Node(f"UNARY_{token.type}", right=self.factor())
@@ -746,11 +748,11 @@ def eval_parsed(node: Node, env: Environment):
                 func = eval_parsed(node.left, env)
             if node.type == "CALL":
                 if hasattr(func, "get_attr") and (call := func.get_attr("_call")):
-                    return call._call(parameters) if hasattr(call, "_call") else call(parameters)
+                    return getattr(call, "_call", call)(parameters)
                 return func(*parameters)
             elif node.type == "GET_ITEM":
                 if hasattr(func, "_get_item") (call := func.get_attr("_get_item")):
-                    return call._call(parameters) if hasattr(call, "_call") else call(parameters)
+                    return getattr(call, "_call", call)(parameters)
                 return func[*parameters]
         case "EQUALS":
             if (
@@ -758,7 +760,7 @@ def eval_parsed(node: Node, env: Environment):
                 or node.left.type == "NAME"
                 and node.left.value in reserved_names
             ):
-                raise SyntaxError(f"Invalid left operand for '=': {node.left.value}")
+                raise SyntaxError(f"Invalid left operand for '=': {node.left.value or node.left.type}")
             if node.left.type == "OF":
                 attr_name = node.left.left.value
                 obj = eval_parsed(node.left.right, env)
