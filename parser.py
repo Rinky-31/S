@@ -366,7 +366,7 @@ class Parser:
                 raise SyntaxError("Unexcepted token: ','")
             case "PLUS" | "MINUS" | "STAR" | "SLASH":
                 self.next()
-                return Node(f"UNARY_{token.type}", right=self.factor())
+                return Node(f"UNARY_{token.type}", token.value, right=self.factor())
             case "INCREMENT":
                 self.next()
                 return Node("PRE_INCREMENT", left=self.factor())
@@ -734,8 +734,8 @@ def eval_parsed(node: Node, env: Environment):
             return eval_parsed(node.left, env) // eval_parsed(node.right, env)
         case "STAR":
             return eval_parsed(node.left, env) * eval_parsed(node.right, env)
-        case "UNARY_STAR":
-            return eval_parsed(node.right, env) * 1
+        case "UNARY_STAR" | "UNARY_SLASH":
+            raise SyntaxError(f"Unsupported unary operation in this version: {node.value}")
         case "ATTRIBUTE":
             name = node.left.value
             value = node.value
